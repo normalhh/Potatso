@@ -10,6 +10,7 @@ import Foundation
 import Cartography
 import PotatsoModel
 import RealmSwift
+import Realm
 import PotatsoLibrary
 
 private let kGroupCellIdentifier = "group"
@@ -71,12 +72,13 @@ class ConfigGroupChooseWindow: UIWindow {
 
 class ConfigGroupChooseVC: UIViewController, UITableViewDataSource, UITableViewDelegate {
 
-    var groups: [ConfigurationGroup]
+    let groups: Results<ConfigurationGroup>
     let colors = ["3498DB", "E74C3C", "8E44AD", "16A085", "E67E22", "2C3E50"]
     var gesture: UITapGestureRecognizer?
+    var token: RLMNotificationToken?
 
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: NSBundle?) {
-        groups = defaultRealm.objects(ConfigurationGroup).sorted("createAt").map { $0 }
+        groups = DBUtils.allNotDeleted(ConfigurationGroup.self, sorted: "createAt")
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
         NSNotificationCenter.defaultCenter().addObserver(self, selector: #selector(onVPNStatusChanged), name: kProxyServiceVPNStatusNotification, object: nil)
     }
@@ -92,6 +94,26 @@ class ConfigGroupChooseVC: UIViewController, UITableViewDataSource, UITableViewD
     override func viewWillAppear(animated: Bool) {
         super.viewWillAppear(animated)
         updateUI()
+        token = groups.addNotificationBlock { [unowned self] (changed) in
+            switch changed {
+            case let .Update(_, deletions: deletions, insertions: insertions, modifications: modifications):
+                self.tableView.beginUpdates()
+                defer {
+                    self.tableView.endUpdates()
+                    CurrentGroupManager.shared.setConfigGroupId(CurrentGroupManager.shared.group.uuid)
+                }
+                self.tableView.deleteRowsAtIndexPaths(deletions.map({ NSIndexPath(forRow: $0, inSection: 0) }), withRowAnimation: .Automatic)
+                self.tableView.insertRowsAtIndexPaths(insertions.map({ NSIndexPath(forRow: $0, inSection: 0) }), withRowAnimation: .Automatic)
+                self.tableView.reloadRowsAtIndexPaths(modifications.map({ NSIndexPath(forRow: $0, inSection: 0) }), withRowAnimation: .Automatic)
+            default:
+                break
+            }
+        }
+    }
+
+    override func viewWillDisappear(animated: Bool) {
+        super.viewDidDisappear(animated)
+        token?.stop()
     }
 
     func onVPNStatusChanged() {
@@ -103,7 +125,7 @@ class ConfigGroupChooseVC: UIViewController, UITableViewDataSource, UITableViewD
     }
 
     func showConfigGroup(group: ConfigurationGroup, animated: Bool = true) {
-        CurrentGroupManager.shared.group = group
+        CurrentGroupManager.shared.setConfigGroupId(group.uuid)
         ConfigGroupChooseManager.shared.hide()
     }
 
@@ -152,16 +174,8 @@ class ConfigGroupChooseVC: UIViewController, UITableViewDataSource, UITableViewD
                 return
             }
             item = groups[indexPath.row]
-            tableView.beginUpdates()
-            defer {
-                tableView.endUpdates()
-            }
             do {
-                groups.removeAtIndex(indexPath.row)
-                try defaultRealm.write {
-                    defaultRealm.delete(item)
-                }
-                tableView.deleteRowsAtIndexPaths([indexPath], withRowAnimation: .Automatic)
+                try DBUtils.softDelete(item.uuid, type: ConfigurationGroup.self)
             }catch {
                 self.showTextHUD("\("Fail to delete item".localized()): \((error as NSError).localizedDescription)", dismissAfterDelay: 1.5)
             }

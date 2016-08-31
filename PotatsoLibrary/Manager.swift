@@ -46,7 +46,9 @@ public class Manager {
 
     var observerAdded: Bool = false
     
-    public private(set) var defaultConfigGroup: ConfigurationGroup!
+    public var defaultConfigGroup: ConfigurationGroup {
+        return getDefaultConfigGroup()
+    }
 
     private init() {
         loadProviderManager { (manager) -> Void in
@@ -115,26 +117,29 @@ public class Manager {
         }
     }
     
-    public func setup() throws {
+    public func setup() {
         setupDefaultReaml()
-        try initDefaultConfigGroup()
         do {
             try copyGEOIPData()
+        }catch{
+            print("copyGEOIPData fail")
+        }
+        do {
             try copyTemplateData()
         }catch{
-            print("copy fail")
+            print("copyTemplateData fail")
         }
     }
-    
+
     func copyGEOIPData() throws {
         guard let fromURL = NSBundle.mainBundle().URLForResource("GeoLite2-Country", withExtension: "mmdb") else {
             return
         }
         let toURL = Potatso.sharedUrl().URLByAppendingPathComponent("GeoLite2-Country.mmdb")
         if NSFileManager.defaultManager().fileExistsAtPath(fromURL.path!) {
-//            if NSFileManager.defaultManager().fileExistsAtPath(toURL.path!) {
-//                try NSFileManager.defaultManager().removeItemAtURL(toURL)
-//            }
+            if NSFileManager.defaultManager().fileExistsAtPath(toURL.path!) {
+                try NSFileManager.defaultManager().removeItemAtURL(toURL)
+            }
             try NSFileManager.defaultManager().copyItemAtURL(fromURL, toURL: toURL)
         }
     }
@@ -160,34 +165,38 @@ public class Manager {
         }
     }
 
-    public func initDefaultConfigGroup() throws {
-        if let groupUUID = Potatso.sharedUserDefaults().stringForKey(kDefaultGroupIdentifier), group = defaultRealm.objects(ConfigurationGroup).filter("uuid = '\(groupUUID)'").first{
-            try setDefaultConfigGroup(group)
+    private func getDefaultConfigGroup() -> ConfigurationGroup {
+        if let groupUUID = Potatso.sharedUserDefaults().stringForKey(kDefaultGroupIdentifier), group = DBUtils.get(groupUUID, type: ConfigurationGroup.self) where !group.deleted {
+            return group
         }else {
             var group: ConfigurationGroup
-            if let g = defaultRealm.objects(ConfigurationGroup).first {
+            if let g = DBUtils.allNotDeleted(ConfigurationGroup.self, sorted: "createAt").first {
                 group = g
             }else {
                 group = ConfigurationGroup()
                 group.name = "Default".localized()
                 do {
-                    try defaultRealm.write {
-                        defaultRealm.add(group)
-                    }
+                    try DBUtils.add(group)
                 }catch {
                     fatalError("Fail to generate default group")
                 }
             }
-            try setDefaultConfigGroup(group)
+            let uuid = group.uuid
+            let name = group.name
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), { 
+                self.setDefaultConfigGroup(uuid, name: name)
+            })
+            return group
         }
     }
     
-    public func setDefaultConfigGroup(group: ConfigurationGroup) throws {
-        defaultConfigGroup = group
-        try regenerateConfigFiles()
-        let uuid = defaultConfigGroup.uuid
-        let name = defaultConfigGroup.name
-        Potatso.sharedUserDefaults().setObject(uuid, forKey: kDefaultGroupIdentifier)
+    public func setDefaultConfigGroup(id: String, name: String) {
+        do {
+            try regenerateConfigFiles()
+        } catch {
+
+        }
+        Potatso.sharedUserDefaults().setObject(id, forKey: kDefaultGroupIdentifier)
         Potatso.sharedUserDefaults().setObject(name, forKey: kDefaultGroupName)
         Potatso.sharedUserDefaults().synchronize()
     }
@@ -312,8 +321,9 @@ extension Manager {
         var forwardURLRules: [String] = []
         var forwardIPRules: [String] = []
         var forwardGEOIPRules: [String] = []
-        let rules = defaultConfigGroup.ruleSets.map({ $0.rules }).flatMap({ $0 })
+        let rules = defaultConfigGroup.ruleSets.flatMap({ $0.rules })
         for rule in rules {
+            
             switch rule.type {
             case .GeoIP:
                 forwardGEOIPRules.append(rule.description)

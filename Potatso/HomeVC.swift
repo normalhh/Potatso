@@ -26,16 +26,7 @@ class HomeVC: FormViewController, UINavigationControllerDelegate, HomePresenterP
 
     var status: VPNStatus {
         didSet(o) {
-            connectButton.enabled = [VPNStatus.On, VPNStatus.Off].contains(status)
-            connectButton.setTitleColor(UIColor.whiteColor(), forState: .Normal)
-            switch status {
-            case .Connecting, .Disconnecting:
-                connectButton.animating = true
-            default:
-                connectButton.setTitle(status.hintDescription, forState: .Normal)
-                connectButton.animating = false
-            }
-            connectButton.backgroundColor = status.color
+            updateConnectButton()
         }
     }
 
@@ -81,7 +72,6 @@ class HomeVC: FormViewController, UINavigationControllerDelegate, HomePresenterP
     func updateTitle() {
         titleButton.setTitle(presenter.group.name, forState: .Normal)
         titleButton.sizeToFit()
-//        navigationItem.title = presenter.group.name
     }
 
     func updateForm() {
@@ -91,6 +81,19 @@ class HomeVC: FormViewController, UINavigationControllerDelegate, HomePresenterP
         form +++ generateRuleSetSection()
         form.delegate = self
         tableView?.reloadData()
+    }
+
+    func updateConnectButton() {
+        connectButton.enabled = [VPNStatus.On, VPNStatus.Off].contains(status)
+        connectButton.setTitleColor(UIColor.whiteColor(), forState: .Normal)
+        switch status {
+        case .Connecting, .Disconnecting:
+            connectButton.animating = true
+        default:
+            connectButton.setTitle(status.hintDescription, forState: .Normal)
+            connectButton.animating = false
+        }
+        connectButton.backgroundColor = status.color
     }
 
     // MARK: - Form
@@ -152,7 +155,17 @@ class HomeVC: FormViewController, UINavigationControllerDelegate, HomePresenterP
             ruleSetSection
                 <<< LabelRow () {
                     $0.title = "\(ruleSet.name)"
-                    $0.value = ruleSet.rules.count <= 1 ? String(format: "%d rules".localized(), ruleSet.rules.count) :  String(format: "%d rule".localized(), ruleSet.rules.count)
+                    var count = 0
+                    if ruleSet.ruleCount > 0 {
+                        count = ruleSet.ruleCount
+                    }else {
+                        count = ruleSet.rules.count
+                    }
+                    if count > 1 {
+                        $0.value = String(format: "%d rules".localized(),  count)
+                    }else {
+                        $0.value = String(format: "%d rule".localized(), count)
+                    }
                 }.cellSetup({ (cell, row) -> () in
                     cell.selectionStyle = .None
                 })
